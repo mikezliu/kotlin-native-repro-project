@@ -1,0 +1,79 @@
+plugins {
+    id 'kotlin-multiplatform'
+    id 'kotlinx-serialization'
+}
+
+kotlin {
+
+    // Comment this block and things will work again
+    iosArm64 {
+        binaries {
+            framework {
+                baseName = "foo"
+            }
+        }
+    }
+
+    targets {
+        final def iOSTarget = System.getenv('SDK_NAME')?.startsWith("iphoneos") \
+                              ? presets.iosArm64 : presets.iosX64
+
+        fromPreset(iOSTarget, 'iOS') {
+            compilations.main.outputKinds('FRAMEWORK')
+        }
+
+        fromPreset(presets.jvm, 'android')
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            api "org.jetbrains.kotlin:kotlin-stdlib-common:$ktorVersion"
+            api "org.jetbrains.kotlin:kotlin-stdlib:$ktorVersion"
+            api "org.jetbrains.kotlinx:kotlinx-coroutines-core-common:$kotlinCoroutineVersion"
+            api "org.jetbrains.kotlinx:kotlinx-serialization-runtime:$kotlinSerializationVersion"
+
+            api "com.soywiz:klock:1.1.1"
+
+            api "io.ktor:ktor-client-core:$ktorVersion"
+        }
+
+        androidMain.dependencies {
+            api "org.jetbrains.kotlinx:kotlinx-coroutines-android:$kotlinCoroutineVersion"
+            api "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
+
+            api "io.ktor:ktor-client-android:$ktorVersion"
+        }
+
+        iOSMain.dependencies {
+            api "org.jetbrains.kotlinx:kotlinx-serialization-runtime-native:$kotlinSerializationVersion"
+            api "org.jetbrains.kotlinx:kotlinx-coroutines-core-native:$kotlinCoroutineVersion"
+
+            api "io.ktor:ktor-client-ios:$ktorVersion"
+        }
+    }
+}
+
+// workaround for https://youtrack.jetbrains.com/issue/KT-27170
+configurations {
+    compileClasspath
+}
+
+task packForXCode(type: Sync) {
+    final File frameworkDir = new File(buildDir, "xcode-frameworks")
+    final String mode = project.findProperty("XCODE_CONFIGURATION")?.toUpperCase() ?: 'DEBUG'
+
+    inputs.property "mode", mode
+    dependsOn kotlin.targets.iOS.compilations.main.linkTaskName("FRAMEWORK", mode)
+
+    from { kotlin.targets.iOS.compilations.main.getBinary("FRAMEWORK", mode).parentFile }
+    into frameworkDir
+
+    doLast {
+        new File(frameworkDir, 'gradlew').with {
+            text = "#!/bin/bash\nexport 'JAVA_HOME=${System.getProperty("java.home")}'\ncd '${rootProject.rootDir}'\n./gradlew \$@\n"
+            setExecutable(true)
+        }
+    }
+}
+
+tasks.build.dependsOn packForXCode
